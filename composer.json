@@ -13,7 +13,7 @@
     ],
     "config": {
         "platform": {
-            "php": "8.0.0"
+            "php": "8.0.3"
         }
     },
     "require": {
@@ -21,6 +21,10 @@
         "slim/psr7": "^1.5",
         "robmorgan/phinx": "^0.13",
         "vlucas/phpdotenv": "^5.4",
-        "guzzlehttp/guzzle": "^7.4"
+        "guzzlehttp/guzzle": "^7.4",
+        "php-di/php-di": "^7.1",
+        "monolog/monolog": "^2.11",
+        "illuminate/database": "9.0",
+        "illuminate/events": "9.0"
     }
 }

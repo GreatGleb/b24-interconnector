@@ -1,8 +1,11 @@
 <?php
-use Slim\App;
+
 use App\Controllers\DealController;
+use App\Middleware\BitrixValidationMiddleware;
+use App\Middleware\TokenAuthMiddleware;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
+use Slim\App;
 
 return function (App $app) {
     // Тестовый корневой роут
@@ -16,5 +19,7 @@ return function (App $app) {
     });
 
     // Рабочие эндпоинты
-    $app->get('/inbound/from-source', [DealController::class, 'inboundFromSource']);
+    $app->get('/inbound/from-source', [DealController::class, 'inboundFromSource'])
+        ->add(BitrixValidationMiddleware::class)
+        ->add(TokenAuthMiddleware::class);
 };

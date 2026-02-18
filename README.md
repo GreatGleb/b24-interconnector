@@ -10,12 +10,50 @@
 - **Связка сущностей**: Сервис хранит карту соответствий ID сделки в Системе А и Системе Б, что позволяет корректно возвращать обновления и комментарии в нужную карточку.
 
 ## Стек технологий
-- **PHP 8.1+** (Slim 4 Framework)
+![PHP Version](https://img.shields.io/badge/PHP-8.0%2B-777BB4?style=flat-square&logo=php)
+![Slim Framework](https://img.shields.io/badge/Slim_4-5B5B5B?style=flat-square&logo=slim)
+![MySQL](https://img.shields.io/badge/MySQL-4479A1?style=flat-square&logo=mysql&logoColor=white)
+![Eloquent](https://img.shields.io/badge/Eloquent_ORM-FF2D20?style=flat-square&logo=laravel&logoColor=white)
+![Monolog](https://img.shields.io/badge/Logging-Monolog-D291BC?style=flat-square)
+![Guzzle](https://img.shields.io/badge/HTTP_Client-Guzzle-FF9E00?style=flat-square)
+![Composer](https://img.shields.io/badge/Composer-885630?style=flat-square&logo=composer&logoColor=white)
+- **PHP 8.0+** (Slim 4 Framework)
 - **MySQL** (Очередь задач)
 - **Phinx** (Миграции базы данных)
+- **Eloquent ORM (Illuminate Database)** (Управление сущностями и БД)
+- **Monolog** (Продвинутое логирование событий и ошибок (PSR-3))
+- **PHP-DI** (Внедрение зависимостей (Dependency Injection))
 - **Guzzle** (HTTP-клиент для API Битрикс24)
 - **vlucas/phpdotenv** (Управление конфигурацией)
 - **Composer** (Управление зависимостями)
+
+## Архитектура и структура проекта
+
+- `public/index.php` — **Endpoint (Приёмник)**. Принимает вебхуки от Битрикс24 и быстро записывает их в очередь (MySQL), не заставляя Битрикс ждать.
+- `bin/worker.php` — **Worker (Обработчик)**. Скрипт, который запускается по Cron, выгребает сделки из базы и выполняет тяжелую работу: запрашивает детали, создает сделки в другой системе, пишет логи.
+- `src/` — **Logic (Ядро)**. Здесь будут лежать классы для работы с API Битрикс24 и логика трансформации данных.
+- `migrations/` — **Database (Схема)**. Описание таблиц для Phinx, что позволяет развернуть БД одной командой.
+- `logs/` — **Monitoring**. Журналы работы воркера и ошибок API.
+
+### Архитектурный паттерн ADR (Action-Domain-Responder)
+Проект реализован с разделением ответственности по принципу ADR:
+
+* **Action (Controllers)**: Принимает HTTP-запрос, делегирует задачу сервису и передает результат в Responder.
+* **Domain (Services/Models)**: Содержит бизнес-логику. Включает `QueueService` для управления очередью и Eloquent-модели для работы с БД.
+* **Responder**: Унифицированный формат вывода через `App\Responses\ApiResponse`, обеспечивающий консистентность JSON-ответов.
+
+### Middleware Pipeline (Цепочка фильтрации)
+Каждый входящий запрос проходит через следующие слои:
+
+1.  **ErrorHandling**: Перехватывает любые исключения и возвращает чистый JSON-ответ.
+2.  **TokenAuth**: Проверяет наличие и валидность `application_token` (безопасность).
+3.  **BitrixValidation**: Проверяет наличие обязательных полей (например, id сделки).
+
+### Логирование и Мониторинг
+Система использует Monolog (PSR-3) для записи событий в `logs/app.log`:
+- `INFO`: Успешная постановка сделок в очередь.
+- `WARNING`: Попытки несанкционированного доступа (неверный токен).
+- `ERROR`: Критические ошибки базы данных или API.
 
 ## Установка и развертывание
 
@@ -89,11 +127,3 @@ server {
 2. **Обратная связь от Дилера (Vinipol)**:
     - `GET https://ваш-домен.org/inbound/from-vinipol`
     - Назначение: Сюда Битрикс-получатель присылает обновления (например, когда менеджер Vinipol изменил статус или добавил комментарий), чтобы данные вернулись в исходную систему.
-
-## Архитектура и структура проекта
-
-- `public/index.php` — **Endpoint (Приёмник)**. Принимает вебхуки от Битрикс24 и быстро записывает их в очередь (MySQL), не заставляя Битрикс ждать.
-- `bin/worker.php` — **Worker (Обработчик)**. Скрипт, который запускается по Cron, выгребает сделки из базы и выполняет тяжелую работу: запрашивает детали, создает сделки в другой системе, пишет логи.
-- `src/` — **Logic (Ядро)**. Здесь будут лежать классы для работы с API Битрикс24 и логика трансформации данных.
-- `migrations/` — **Database (Схема)**. Описание таблиц для Phinx, что позволяет развернуть БД одной командой.
-- `logs/` — **Monitoring**. Журналы работы воркера и ошибок API.

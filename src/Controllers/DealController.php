@@ -1,30 +1,24 @@
 <?php
+
 namespace App\Controllers;
 
+use App\Services\QueueServiceInterface;
+use App\Responses\DealResponder;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
-use App\Services\QueueService;
 
 class DealController
 {
-    public function inboundFromSource(Request $request, Response $response)
+    public function __construct(
+        private QueueServiceInterface $queueService,
+        private DealResponder $responder
+    ) {}
+
+    public function inboundFromSource(Request $request, Response $response): Response
     {
-        $params = $request->getQueryParams();
-        $dealId = $params['id'] ?? $params['data']['FIELDS']['ID'] ?? null;
+        $dto = $request->getAttribute('deal_dto');
+        $this->queueService->addToQueue($dto);
 
-        if (!$dealId) {
-            $response->getBody()->write(json_encode(['error' => 'Deal ID not found']));
-            return $response->withStatus(400)->withHeader('Content-Type', 'application/json');
-        }
-
-        $queue = new QueueService();
-        $queue->addToQueue($dealId, 'source', $params);
-
-        $response->getBody()->write(json_encode([
-            'status' => 'accepted',
-            'deal_id' => $dealId
-        ]));
-
-        return $response->withHeader('Content-Type', 'application/json');
+        return $this->responder->respond($response, $dto);
     }
 }
