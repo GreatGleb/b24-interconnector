@@ -19,9 +19,9 @@ class TokenAuthMiddleware
 
     public function __invoke(Request $request, Handler $handler): Response
     {
-        $params = $request->getQueryParams();
-        $body = $request->getParsedBody();
-        $receivedToken = $params['auth']['application_token'] ?? $body['auth']['application_token'] ?? null;
+        $routeContext = \Slim\Routing\RouteContext::fromRequest($request);
+        $route = $routeContext->getRoute();
+        $receivedToken = $route->getArgument('token');
 
         if (!$receivedToken || $receivedToken !== $this->validToken) {
             $ip = $request->getServerParams()['REMOTE_ADDR'] ?? 'unknown';

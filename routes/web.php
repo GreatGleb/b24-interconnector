@@ -18,8 +18,7 @@ return function (App $app) {
         return $response->withHeader('Content-Type', 'application/json');
     });
 
-    // Рабочие эндпоинты
-    $app->get('/inbound/from-source', [DealController::class, 'inboundFromSource'])
+    $app->get('/rest/{user_id}/{token}/crm.deal.get.json', [DealController::class, 'inboundFromSource'])
         ->add(BitrixValidationMiddleware::class)
         ->add(TokenAuthMiddleware::class);
 };

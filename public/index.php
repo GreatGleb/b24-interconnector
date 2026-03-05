@@ -1,4 +1,5 @@
 <?php
+
 use Slim\Factory\AppFactory;
 use DI\ContainerBuilder;
 use Monolog\Logger;
@@ -48,6 +49,7 @@ $containerBuilder->addDefinitions([
     },
     \App\Services\QueueServiceInterface::class => \DI\autowire(\App\Services\QueueService::class),
     \App\Services\BitrixRequestExtractor::class => \DI\autowire(\App\Services\BitrixRequestExtractor::class),
+    \App\Services\BitrixClient::class => \DI\autowire(\App\Services\BitrixClient::class),
 ]);
 
 $container = $containerBuilder->build();
