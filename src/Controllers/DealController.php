@@ -14,7 +14,7 @@ class DealController
         private DealResponder $responder
     ) {}
 
-    public function inboundFromSource(Request $request, Response $response): Response
+    public function handleWebhook(Request $request, Response $response): Response
     {
         $dto = $request->getAttribute('deal_dto');
         $this->queueService->addToQueue($dto);

@@ -11,6 +11,7 @@ ob_end_clean();
 use App\Models\DealQueue;
 use App\Services\BitrixClient;
 use Psr\Log\LoggerInterface;
+use Carbon\Carbon;
 
 if (!$app instanceof \Slim\App) {
     if (!isset($container)) {
@@ -31,6 +32,10 @@ if (isset($container)) {
 
     try {
         echo "Запуск цикла... Ищу сделки в статусе pending\n";
+
+        DealQueue::where('status', 'processing')
+            ->where('updated_at', '<', Carbon::now()->subHour())
+            ->update(['status' => 'pending']);
 
         $total = DealQueue::count();
         $pendingCount = DealQueue::where('status', 'pending')->count();
@@ -62,69 +67,98 @@ if (isset($container)) {
 
                 $logger->info("Processing Deal #{$deal->external_id}");
 
-                $response = $bitrix->call($_ENV['SOURCE_B24_WEBHOOK'], 'crm.deal.get', ['id' => $deal->external_id], 'GET');
-                $sourceDeal = $response['result'] ?? null; // Достаем саму сделку
+                if ($deal->source_type === 'receiver') {
+                    $payload = $deal->payload;
 
-                if (!$sourceDeal) {
-                    throw new \Exception("Данные сделки не найдены в ответе Битрикса");
-                }
+                    // 1. Список ключей, которые НЕ нужно отправлять в update (технические поля)
+                    $excludeKeys = [
+                        'ID', 'id', 'ORIGIN_ID', 'origin_id',
+                        'user_id', 'token', 'event', 'ts'
+                    ];
 
-                // Берем сырой комментарий. Если его нет, ставим пустую строку.
-                $rawComment = $sourceDeal['COMMENTS'] ?? '';
+                    // 2. Фильтруем payload: оставляем только полезные данные
+                    $fieldsToUpdate = array_filter($payload, function($value, $key) use ($excludeKeys) {
+                        // Убираем технические ключи и пустые значения
+                        return !in_array(strtoupper($key), array_map('strtoupper', $excludeKeys))
+                            && $value !== null
+                            && $value !== '';
+                    }, ARRAY_FILTER_USE_BOTH);
 
-                // 2. Создаем в Виниполе
-                $response = $bitrix->call($_ENV['RECEIVER_B24_WEBHOOK'], 'crm.deal.add', [
-                    'fields' => [
-                        'TITLE'       => ($sourceDeal['TITLE'] ?? 'Без названия') . ' (из Винилам)',
-                        'OPPORTUNITY' => $sourceDeal['OPPORTUNITY'] ?? 0,
-                        'CURRENCY_ID' => $sourceDeal['CURRENCY_ID'] ?? 'RUB',
-                        // Если $rawComment это массив, превращаем его в строку, иначе Битрикс выдаст ошибку
-                        'COMMENTS'    => is_array($rawComment) ? json_encode($rawComment, JSON_UNESCAPED_UNICODE) : $rawComment,
-                        'CATEGORY_ID' => 19,
-                        'STAGE_ID'    => 'C19:NEW', // Уточни префикс C, обычно для воронки 19 это C19:NEW
-                        'ORIGIN_ID'   => $deal->external_id,
-                    ]
-                ]);
-
-                $newDealId = $response['result'] ?? null;
-
-                if ($newDealId) {
-                    $msg = "✅ Заказ передан в Винипол. Создана сделка №{$newDealId}";
-                    echo $msg . PHP_EOL;
-
-                    try {
-                        $bitrix->call($_ENV['SOURCE_B24_WEBHOOK'], 'crm.timeline.comment.add', [
-                            'fields' => [
-                                'ENTITY_ID'   => $deal->external_id,
-                                'ENTITY_TYPE' => 'deal',
-                                'COMMENT'     => $msg
-                            ]
+                    // 3. Если после фильтрации что-то осталось — пушим в Винилам
+                    if (!empty($fieldsToUpdate)) {
+                        $bitrix->call($_ENV['SOURCE_B24_WEBHOOK'], 'crm.deal.update', [
+                            'id' => $deal->external_id,
+                            'fields' => $fieldsToUpdate
                         ]);
-                    } catch (\Exception $e) {
-                        $logger->warning("Could not add timeline comment: " . $e->getMessage());
+
+                        echo "✅ Сделка #{$deal->external_id} обновлена полями: " . implode(', ', array_keys($fieldsToUpdate)) . "\n";
                     }
 
-                    // Двигаем стадию в Источнике
-                    $bitrix->call($_ENV['SOURCE_B24_WEBHOOK'], 'crm.deal.update', [
-                        'id' => $deal->external_id,
+                    $deal->update(['status' => 'done']);
+                } else {
+                    $response = $bitrix->call($_ENV['SOURCE_B24_WEBHOOK'], 'crm.deal.get', ['id' => $deal->external_id], 'GET');
+                    $sourceDeal = $response['result'] ?? null; // Достаем саму сделку
+
+                    if (!$sourceDeal) {
+                        throw new \Exception("Данные сделки не найдены в ответе Битрикса");
+                    }
+
+                    $rawComment = $sourceDeal['COMMENTS'] ?? '';
+
+                    // 2. Создаем в Виниполе
+                    $response = $bitrix->call($_ENV['RECEIVER_B24_WEBHOOK'], 'crm.deal.add', [
                         'fields' => [
-                            'STAGE_ID' => 'C2:UC_MXQPC8'
+                            'TITLE' => ($sourceDeal['TITLE'] ?? 'Без названия') . ' (из Винилам)',
+                            'OPPORTUNITY' => $sourceDeal['OPPORTUNITY'] ?? 0,
+                            'CURRENCY_ID' => $sourceDeal['CURRENCY_ID'] ?? 'RUB',
+                            // Если $rawComment это массив, превращаем его в строку, иначе Битрикс выдаст ошибку
+                            'COMMENTS' => is_array($rawComment) ? json_encode($rawComment, JSON_UNESCAPED_UNICODE) : $rawComment,
+                            'CATEGORY_ID' => 19,
+                            'STAGE_ID' => 'C19:NEW', // префикс C, обычно для воронки 19 это C19:NEW
+                            'ORIGIN_ID' => $deal->external_id,
                         ]
                     ]);
 
-                    // 5. Финализируем
-                    $deal->update(['status' => 'done']); // У тебя в коде было 'done', в базе обычно 'completed', проверь соответствие
-                    $logger->info("Deal #{$deal->external_id} processed. New ID: {$newDealId}");
-                    echo "Сделка #{$deal->external_id} успешно обработана!\n";
-                } else {
-                    $errorMsg = "Bitrix returned success but no ID was created.";
-                    $logger->error("Failed to create deal in Receiver for #{$deal->external_id}: {$errorMsg}");
-                    echo "Failed to create deal in Receiver for #{$deal->external_id}: {$errorMsg}";
+                    $newDealId = $response['result'] ?? null;
 
-                    $deal->update([
-                        'status' => 'error',
-                        'error_log' => $errorMsg
-                    ]);
+                    if ($newDealId) {
+                        $msg = "✅ Заказ передан в Винипол. Создана сделка №{$newDealId}";
+                        echo $msg . PHP_EOL;
+
+                        try {
+                            $bitrix->call($_ENV['SOURCE_B24_WEBHOOK'], 'crm.timeline.comment.add', [
+                                'fields' => [
+                                    'ENTITY_ID' => $deal->external_id,
+                                    'ENTITY_TYPE' => 'deal',
+                                    'COMMENT' => $msg
+                                ]
+                            ]);
+                        } catch (\Exception $e) {
+                            $logger->warning("Could not add timeline comment: " . $e->getMessage());
+                        }
+
+                        // Двигаем стадию в Источнике
+                        $bitrix->call($_ENV['SOURCE_B24_WEBHOOK'], 'crm.deal.update', [
+                            'id' => $deal->external_id,
+                            'fields' => [
+                                'STAGE_ID' => 'C2:UC_MXQPC8'
+                            ]
+                        ]);
+
+                        // 5. Финализируем
+                        $deal->update(['status' => 'done']);
+                        $logger->info("Deal #{$deal->external_id} processed. New ID: {$newDealId}");
+                        echo "Сделка #{$deal->external_id} успешно обработана!\n";
+                    } else {
+                        $errorMsg = "Bitrix returned success but no ID was created.";
+                        $logger->error("Failed to create deal in Receiver for #{$deal->external_id}: {$errorMsg}");
+                        echo "Failed to create deal in Receiver for #{$deal->external_id}: {$errorMsg}";
+
+                        $deal->update([
+                            'status' => 'error',
+                            'error_log' => $errorMsg
+                        ]);
+                    }
                 }
             } catch (\Exception $e) {
                 $logger->error("Failed to process deal #{$deal->external_id}: " . $e->getMessage());

@@ -12,12 +12,13 @@ use App\Services\BitrixRequestExtractor;
 class BitrixValidationMiddleware
 {
     public function __construct(
-        private BitrixRequestExtractor $extractor
+        private BitrixRequestExtractor $extractor,
+        private string $sourceType = 'source'
     ) {}
 
     public function __invoke(Request $request, Handler $handler): Response
     {
-        $dto = $this->extractor->extract($request);
+        $dto = $this->extractor->extract($request, $this->sourceType);
 
         if (!$dto) {
             return ApiResponse::error(new SlimResponse(), 'Validation failed: ID is missing', 400);
