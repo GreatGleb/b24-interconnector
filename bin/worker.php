@@ -56,7 +56,7 @@ if (isset($container)) {
 
         foreach ($deals as $deal) {
             try {
-                echo "--- Начало обработки сделки #{$deal->external_id} ---\n";
+                echo "--- Начало обработки сделки #{$deal->external_id} - {$deal->source_type} ---\n";
 
                 // 1. Атомарно помечаем, что взяли в работу
                 $deal->update([
@@ -67,9 +67,9 @@ if (isset($container)) {
 
                 $logger->info("Processing Deal #{$deal->external_id}");
 
-                if ($deal->source_type === 'receiver') {
-                    $payload = $deal->payload;
+                $payload = $deal->payload;
 
+                if ($deal->source_type === 'receiver') {
                     // 1. Список ключей, которые НЕ нужно отправлять в update (технические поля)
                     $excludeKeys = [
                         'ID', 'id', 'ORIGIN_ID', 'origin_id',
@@ -103,20 +103,44 @@ if (isset($container)) {
                         throw new \Exception("Данные сделки не найдены в ответе Битрикса");
                     }
 
+                    $segmentId = null;
+                    if (($payload['segment'] ?? '') === 'конечник') {
+                        $segmentId = '1321';
+                    } elseif (($payload['segment'] ?? '') === 'дизайнер') {
+                        $segmentId = '1323';
+                    }
+
+                    $contact_info = $payload['contact_info'] ?? '';
+                    $article = $payload['article'] ?? '';
+                    $square_meters = $payload['square_meters'] ?? '';
+                    $manager_name = $payload['manager_name'] ?? '';
+                    $transfer_date = $payload['transfer_date'] ?? '';
+
                     $rawComment = $sourceDeal['COMMENTS'] ?? '';
+                    // Если $rawComment это массив, превращаем его в строку, иначе Битрикс выдаст ошибку
+                    $rawComment = is_array($rawComment) ? json_encode($rawComment, JSON_UNESCAPED_UNICODE) : $rawComment;
+                    $comments = $payload['comments'] ?? $rawComment;
+
+                    $requestFields = [
+                        'TITLE' => ($sourceDeal['TITLE'] ?? 'Без названия') . ' (из Винилам)',
+                        'OPPORTUNITY' => $sourceDeal['OPPORTUNITY'] ?? 0,
+                        'CURRENCY_ID' => $sourceDeal['CURRENCY_ID'] ?? 'RUB',
+                        'COMMENTS' => $comments,
+                        'CATEGORY_ID' => 25,
+                        'STAGE_ID' => 'C25:NEW', // Начальная стадия для 25-й воронки
+                        'ORIGIN_ID' => $deal->external_id,
+
+                        'UF_CRM_1773568798364' => $segmentId,
+                        'UF_CRM_1773568832661' => $contact_info,
+                        'UF_CRM_1773568858481' => $article,
+                        'UF_CRM_1773568886847' => $square_meters,
+                        'UF_CRM_1773569441'    => $manager_name,
+                        'UF_CRM_1773568973415' => $transfer_date,
+                    ];
 
                     // 2. Создаем в Виниполе
                     $response = $bitrix->call($_ENV['RECEIVER_B24_WEBHOOK'], 'crm.deal.add', [
-                        'fields' => [
-                            'TITLE' => ($sourceDeal['TITLE'] ?? 'Без названия') . ' (из Винилам)',
-                            'OPPORTUNITY' => $sourceDeal['OPPORTUNITY'] ?? 0,
-                            'CURRENCY_ID' => $sourceDeal['CURRENCY_ID'] ?? 'RUB',
-                            // Если $rawComment это массив, превращаем его в строку, иначе Битрикс выдаст ошибку
-                            'COMMENTS' => is_array($rawComment) ? json_encode($rawComment, JSON_UNESCAPED_UNICODE) : $rawComment,
-                            'CATEGORY_ID' => 19,
-                            'STAGE_ID' => 'C19:NEW', // префикс C, обычно для воронки 19 это C19:NEW
-                            'ORIGIN_ID' => $deal->external_id,
-                        ]
+                        'fields' => $requestFields
                     ]);
 
                     $newDealId = $response['result'] ?? null;
