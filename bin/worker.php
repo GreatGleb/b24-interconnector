@@ -70,21 +70,44 @@ if (isset($container)) {
                 $payload = $deal->payload;
 
                 if ($deal->source_type === 'receiver') {
-                    // 1. Список ключей, которые НЕ нужно отправлять в update (технические поля)
+                    // Список ключей, которые НЕ нужно отправлять в update (технические поля)
                     $excludeKeys = [
                         'ID', 'id', 'ORIGIN_ID', 'origin_id',
                         'user_id', 'token', 'event', 'ts'
                     ];
 
-                    // 2. Фильтруем payload: оставляем только полезные данные
-                    $fieldsToUpdate = array_filter($payload, function($value, $key) use ($excludeKeys) {
+                    // Фильтруем payload: оставляем только полезные данные
+                    $filteredFieldsToUpdate = array_filter($payload, function($value, $key) use ($excludeKeys) {
                         // Убираем технические ключи и пустые значения
                         return !in_array(strtoupper($key), array_map('strtoupper', $excludeKeys))
                             && $value !== null
                             && $value !== '';
                     }, ARRAY_FILTER_USE_BOTH);
 
-                    // 3. Если после фильтрации что-то осталось — пушим в Винилам
+                    // Карта соответствия (URL параметры -> коды Винилам)
+                    $mapping = [
+                        'accepted_at'     => 'UF_CRM_1773749705779',
+                        'vinipol_manager' => 'UF_CRM_1773749746541',
+                        'fail_reason'     => 'UF_CRM_1773749784601',
+                        'target_stage'    => 'STAGE_ID', // target_stage превращаем в системный STAGE_ID
+                    ];
+
+                    $fieldsToUpdate = [];
+
+                    foreach ($filteredFieldsToUpdate as $key => $value) {
+                        // Приводим ключ к верхнему регистру для системных полей (comments -> COMMENTS)
+                        $upperKey = strtoupper($key);
+
+                        if (isset($mapping[$key])) {
+                            // Если это наше спецполе из таблицы — мапим его на UF_код или системный ID
+                            $fieldsToUpdate[$mapping[$key]] = $value;
+                        } else {
+                            // Если это любое другое поле (например, COMMENTS), просто оставляем в UPPERCASE
+                            $fieldsToUpdate[$upperKey] = $value;
+                        }
+                    }
+
+                    // Если после фильтрации что-то осталось — пушим в Винилам
                     if (!empty($fieldsToUpdate)) {
                         $bitrix->call($_ENV['SOURCE_B24_WEBHOOK'], 'crm.deal.update', [
                             'id' => $deal->external_id,
@@ -138,7 +161,7 @@ if (isset($container)) {
                         'UF_CRM_1773568973415' => $transfer_date,
                     ];
 
-                    // 2. Создаем в Виниполе
+                    // Создаем в Виниполе
                     $response = $bitrix->call($_ENV['RECEIVER_B24_WEBHOOK'], 'crm.deal.add', [
                         'fields' => $requestFields
                     ]);
@@ -169,7 +192,7 @@ if (isset($container)) {
                             ]
                         ]);
 
-                        // 5. Финализируем
+                        // Финализируем
                         $deal->update(['status' => 'done']);
                         $logger->info("Deal #{$deal->external_id} processed. New ID: {$newDealId}");
                         echo "Сделка #{$deal->external_id} успешно обработана!\n";

@@ -123,7 +123,9 @@ server {
 1. **Регистрация сделки от Источника**:
     - `GET https://ваш-домен.org/webhooks/source/onDealCreate/{token}?ID={deal_id}`
     - Назначение: Сюда Битрикс-отправитель присылает сигнал при создании сделки или смене стадии.
+    - Пример использования: http://localhost/b24-interconnector/public/webhooks/source/onDealCreate/3a5s43flre94kds4?ID=2660&segment=конечник&contact_info=Иванов+Иван+89991234567&article=Винил+Дуб+Арктик+102&square_meters=50&manager_name=Алексей+Винилам&transfer_date=2026-03-15+15:30:00&comments=Срочный+заказ+с+объекта
 
 2. **Обратная связь от Приёмщика**:
     - `GET https://ваш-домен.org/webhooks/receiver/onDealUpdate/{token}?ORIGIN_ID={deal_id}&COMMENTS={comment}`
     - Назначение: Сюда Битрикс-получатель присылает обновления (например, когда менеджер Vinipol изменил статус или добавил комментарий), чтобы данные вернулись в исходную систему.
+    - Пример использования: http://localhost/b24-interconnector/public/webhooks/receiver/onDealUpdate/fdr654f675dt?ORIGIN_ID=2660&COMMENTS=тестово&accepted_at=2026-03-18+15:00&vinipol_manager=Анна+Смирнова&target_stage=C2:WON&fail_reason=Нет+в+наличии
